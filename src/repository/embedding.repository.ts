@@ -20,8 +20,6 @@ async function createWordAndEmbedding(text: string, vector: number[]): Promise<v
 export async function saveWordWithEmbedding(query: string, queryVector: number[]): Promise<SaveResult> {
   const text = normalizeText(query);
 
-  if (await findWord(text)) return "exists";
-
   try {
     await createWordAndEmbedding(text, queryVector);
     return "created";
