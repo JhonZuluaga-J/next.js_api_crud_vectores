@@ -1,12 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeText, isPrismaError } from "@/lib/validators";
 import { DatabaseError } from "@/lib/errors";
-import type { Word } from "@prisma/client";
-type SaveResult = "created" | "exists";
-
-async function findWord(text: string): Promise<Word | null> {
-  return prisma.word.findUnique({ where: { text } });
-}
+export type SaveResult = "created" | "exists";
 
 async function createWordAndEmbedding(text: string, vector: number[]): Promise<void> {
   await prisma.$transaction(async (tx) => {
