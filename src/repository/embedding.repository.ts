@@ -1,31 +1,65 @@
-import { prisma } from "@/lib/prisma";
-import { normalizeText, isPrismaError } from "@/lib/validators";
-import { DatabaseError } from "@/lib/errors";
 import { Pool } from "pg";
+import type { Embedding } from "@/types";
 
-export type SaveResult = "created" | "exists";
+const globalForPool = global as unknown as { pgPool?: Pool };
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+function createPool(): Pool {
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+  });
+}
 
-async function createWordAndEmbedding(text: string, vector: number[]): Promise<void> {
-  const word = await prisma.word.create({ data: { text } });
+export const pool = globalForPool.pgPool ?? createPool();
 
+if (process.env.NODE_ENV !== "production") {
+  globalForPool.pgPool = pool;
+}
+
+process.on("SIGTERM", () => pool.end());
+process.on("SIGINT", () => pool.end());
+
+function parseVector(vectorStr: string): number[] {
+  return vectorStr
+    .replace("[", "")
+    .replace("]", "")
+    .split(",")
+    .map((v) => parseFloat(v));
+}
+
+export async function create(wordId: number, vector: number[]): Promise<void> {
   const vectorString = `[${vector.join(",")}]`;
   await pool.query(
     `INSERT INTO "Embedding" ("word_id", "vector") VALUES ($1, $2::vector)`,
-    [word.id, vectorString]
+    [wordId, vectorString]
   );
 }
 
-export async function saveWordWithEmbedding(query: string, queryVector: number[]): Promise<SaveResult> {
-  const text = normalizeText(query);
+function mapToEmbedding(row: {
+  id: number;
+  word_id: number;
+  vector: string;
+  created_at: Date;
+}): Embedding {
+  return {
+    id: row.id,
+    wordId: row.word_id,
+    vector: parseVector(row.vector),
+    createdAt: row.created_at,
+  };
+}
 
-  try {
-    await createWordAndEmbedding(text, queryVector);
-    return "created";
-  } catch (error: unknown) {
-    console.error("Repository Error:", error);
-    if (isPrismaError(error) && error.code === "P2002") return "exists";
-    throw new DatabaseError("Failed to save word");
-  }
+async function queryEmbeddingByWordId(wordId: number) {
+  return pool.query(
+    `SELECT id, word_id, vector::text, created_at FROM "Embedding" WHERE word_id = $1`,
+    [wordId]
+  );
+}
+
+export async function findByWordId(wordId: number): Promise<Embedding | null> {
+  const result = await queryEmbeddingByWordId(wordId);
+  if (result.rows.length === 0) return null;
+  return mapToEmbedding(result.rows[0]);
 }
