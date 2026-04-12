@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
-import { normalizeText } from "@/lib/validators";
+import { prisma } from "@/lib/db/prisma";
+import { normalizeText } from "@/lib/validation/validators";
 import type { Word } from "@/types";
 
 function mapToWord(dbWord: { id: number; text: string; createdAt: Date }): Word {
@@ -24,5 +24,18 @@ export async function findById(id: number): Promise<Word | null> {
 export async function create(text: string): Promise<Word> {
   const normalized = normalizeText(text);
   const word = await prisma.word.create({ data: { text: normalized } });
+  return mapToWord(word);
+}
+
+export async function deleteById(id: number): Promise<void> {
+  await prisma.word.delete({ where: { id } });
+}
+
+export async function update(id: number, text: string): Promise<Word> {
+  const normalized = normalizeText(text);
+  const word = await prisma.word.update({
+    where: { id },
+    data: { text: normalized },
+  });
   return mapToWord(word);
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { processAndSaveWord } from "@/servicio/embedding.service";
-import { embedRequestSchema } from "@/lib/schemas";
-import { handleApiError } from "@/lib/error-handler";
+import { embedRequestSchema } from "@/lib/validation/schemas";
+import { handleApiError } from "@/lib/errors/error-handler";
 
 export async function POST(req: Request) {
   try {

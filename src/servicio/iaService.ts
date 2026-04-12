@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { AIServiceError } from "@/lib/errors";
+import { AIServiceError } from "@/lib/errors/errors";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

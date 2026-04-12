@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
-import { findWord } from "@/servicio/embedding.service";
-import { searchWordSchema } from "@/lib/schemas";
-import { NotFoundError } from "@/lib/errors";
-import { handleApiError } from "@/lib/error-handler";
+import { findWord, deleteWord, updateWord } from "@/servicio/embedding.service";
+import { searchWordSchema } from "@/lib/validation/schemas";
+import { z } from "zod";
+import { NotFoundError } from "@/lib/errors/errors";
+import { handleApiError } from "@/lib/errors/error-handler";
+
+const deleteWordSchema = z.object({
+  id: z.string().regex(/^\d+$/, "El ID debe ser un número válido").transform((val) => parseInt(val, 10)),
+});
+
+const updateWordSchema = z.object({
+  id: z.string().regex(/^\d+$/, "El ID debe ser un número válido").transform((val) => parseInt(val, 10)),
+  text: z.string().min(1, "El texto es requerido").max(500, "Texto demasiado largo"),
+});
 
 function buildVectorPreview(vector: number[]): string {
   const preview = vector.slice(0, 3).join(", ");
@@ -52,6 +62,50 @@ export async function GET(req: Request) {
     const word = await fetchWord(text, id);
 
     return NextResponse.json(formatWordResponse(word));
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const params = parseSearchParams(req);
+    const { id } = deleteWordSchema.parse(params);
+
+    const word = await findWord(undefined, id);
+    if (!word) {
+      throw new NotFoundError("Palabra", String(id));
+    }
+
+    await deleteWord(id);
+
+    return NextResponse.json(
+      { message: "Palabra eliminada", id },
+      { status: 200 }
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function PUT(req: Request) {
+  try {
+    const urlParams = parseSearchParams(req);
+    const body = await req.json();
+    
+    const { id, text } = updateWordSchema.parse({ ...urlParams, ...body });
+
+    const existingWord = await findWord(undefined, id);
+    if (!existingWord) {
+      throw new NotFoundError("Palabra", String(id));
+    }
+
+    const updatedWord = await updateWord(id, text);
+
+    return NextResponse.json({
+      message: "Palabra actualizada",
+      word: formatWordResponse(updatedWord),
+    });
   } catch (error) {
     return handleApiError(error);
   }

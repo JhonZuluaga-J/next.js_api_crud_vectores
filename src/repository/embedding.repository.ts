@@ -1,25 +1,5 @@
-import { Pool } from "pg";
+import { pool } from "@/lib/db/pool";
 import type { Embedding } from "@/types";
-
-const globalForPool = global as unknown as { pgPool?: Pool };
-
-function createPool(): Pool {
-  return new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-  });
-}
-
-export const pool = globalForPool.pgPool ?? createPool();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPool.pgPool = pool;
-}
-
-process.on("SIGTERM", () => pool.end());
-process.on("SIGINT", () => pool.end());
 
 function parseVector(vectorStr: string): number[] {
   return vectorStr
@@ -62,4 +42,19 @@ export async function findByWordId(wordId: number): Promise<Embedding | null> {
   const result = await queryEmbeddingByWordId(wordId);
   if (result.rows.length === 0) return null;
   return mapToEmbedding(result.rows[0]);
+}
+
+export async function deleteByWordId(wordId: number): Promise<void> {
+  await pool.query(
+    `DELETE FROM "Embedding" WHERE word_id = $1`,
+    [wordId]
+  );
+}
+
+export async function update(wordId: number, vector: number[]): Promise<void> {
+  const vectorString = `[${vector.join(",")}]`;
+  await pool.query(
+    `UPDATE "Embedding" SET vector = $2::vector WHERE word_id = $1`,
+    [wordId, vectorString]
+  );
 }

@@ -32,12 +32,13 @@ export async function processAndSaveWord(query: string): Promise<{
   message: string;
   dimensions: number;
 }> {
-  const vector = await generateEmbedding(query);
 
   const existing = await WordRepo.findByText(query);
   if (existing) {
-    return buildSuccessResponse(query, "exists", vector.length);
+    return buildSuccessResponse(query, "exists", 1536);
   }
+
+  const vector = await generateEmbedding(query);
 
   const word = await WordRepo.create(query);
   await EmbeddingRepo.create(word.id, vector);
@@ -66,4 +67,17 @@ export async function findWord(
   const word = await findWordByCriteria(text, id);
   if (!word) return null;
   return enrichWithEmbedding(word);
+}
+
+export async function deleteWord(id: number): Promise<void> {
+  await EmbeddingRepo.deleteByWordId(id);
+  await WordRepo.deleteById(id);
+}
+
+export async function updateWord(id: number, newText: string): Promise<WordWithEmbedding> {
+  const updatedWord = await WordRepo.update(id, newText);
+  const newVector = await generateEmbedding(newText);
+  await EmbeddingRepo.update(id, newVector);
+  const embedding = await EmbeddingRepo.findByWordId(id);
+  return { ...updatedWord, embedding };
 }
