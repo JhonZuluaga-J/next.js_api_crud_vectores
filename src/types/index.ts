@@ -119,12 +119,7 @@ export interface AuthResponse {
   user: Omit<User, "password">;
 }
 
-export interface JwtPayload {
-  userId: number;
-  email: string;
-  role: string;
-  status: string;
-}
+
 
 export interface CreateUserInput {
   email: string;
@@ -145,3 +140,18 @@ export interface PgEmbeddingRow {
   vector: string;
   created_at: Date;
 };
+
+export interface EmbeddingRow {
+  word_id: number;
+  similarity: number;
+}
+
+/**
+ * Servicio de hashing (abstracción)
+ * de funciones que vamos a utilizar para la encriptar contraseñas
+ * para no exponer directamente las funciones que usamos de bcrypt o otra libreria 
+ */
+export interface PasswordService {
+  hash(password: string): Promise<string>;
+  compare(password: string, hash: string): Promise<boolean>;
+}

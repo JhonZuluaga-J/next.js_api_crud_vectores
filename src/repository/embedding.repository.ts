@@ -1,6 +1,8 @@
 import { pool } from "@/lib/db/pool";
 import { NotFoundError, ConflictError, DatabaseError } from "@/lib/errors/errors";
-import type { Embedding, PgEmbeddingRow } from "@/types";
+import type { Embedding, PgEmbeddingRow, EmbeddingRow } from "@/types";
+
+
 
 function parseVector(vectorStr: string): number[] {
   return vectorStr
@@ -22,52 +24,96 @@ function mapToEmbedding(row: PgEmbeddingRow ): Embedding {
   };
 }
 
-async function handlePgNotFound<T>(promise: Promise<{rows: T[]}>, resource: string, id: PropertyKey,
-): Promise<T> {
-  try{
-  const result = await promise;
-  if (result.rows.length === 0) {
-    //tranformamos en estring el id
-    throw new NotFoundError(resource, id.toString());
-  }
-  return result.rows[0];
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
-      throw error;
-    }
-    throw new DatabaseError("Error al buscar embedding", {
-      message: error instanceof Error ? error.message : String(error)
-    });}
-}
-
-
-export async function create(wordId: number, vector: number[]): Promise<void> {
-  const vectorString = `[${vector.join(",")}]`;
-  await pool.query(`INSERT INTO "Embedding" ("word_id", "vector") VALUES ($1, $2::vector)`, [
-    wordId,
-    vectorString,
-  ]);
-}
-
-
-
-async function queryEmbeddingByWordId(wordId: number) {
-  return pool.query(
-    `SELECT id, word_id, vector::text, created_at FROM "Embedding" WHERE word_id = $1`,
-    [wordId]
+// Type guard para verificar que error tiene propiedad 'code' de tipo string
+function isPgError(error: unknown): error is { code: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as Record<string, unknown>).code === 'string'
   );
 }
 
-export async function findByWordId(wordId: number): Promise<Embedding | null> {
-  const result = await queryEmbeddingByWordId(wordId);
-  if (result.rows.length === 0) return null;
-  return mapToEmbedding(result.rows[0]);
+
+function catchGenericError(error: unknown, Code:string , messages:string): void {
+  if (isPgError(error) && error.code === Code) {
+    throw error; // relanzar error específico
+  }
+  throw new DatabaseError(messages, {
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
+// Manejo de error para casos de "no encontrado" (ej. código P2025 de Prisma/PostgreSQL)
+async function handlePgNotFound<T>(promise: Promise<{ rows: T[] }>, resource: string, id: PropertyKey,
+): Promise<T> {
+  try {
+    const result = await promise;
+    if (result.rows.length === 0) {
+      // Transformamos en string el id para el error personalizado
+      throw new NotFoundError(resource, id.toString());
+    }
+    return result.rows[0];
+  } catch (error: unknown) {
+    catchGenericError(error, 'P2025', 'Error al buscar embedding');
+    throw error;
+  }
+}
+
+
+// Manejo de error para violaciones de unicidad (código 23505 de PostgreSQL)
+// acepto cualquier tipo de pool.query Promise<{ rows: T[] }
+async function handlePgDuplicate<T>(promise: Promise<{ rows: T[] }>, resource: string, id: PropertyKey,
+): Promise<T> {
+  try {
+    const result = await promise;
+    if (result.rows.length === 0) {
+      // Transformamos en string el id para el error personalizado
+      throw new ConflictError(resource, id.toString());
+    }
+    return result.rows[0];
+  } catch (error: unknown) {
+    catchGenericError(error, "23505", "Error al buscar embedding");
+    throw error;
+  }
+}
+
+
+
+export async function create(wordId: number, vector: number[]): Promise<Embedding> {
+  const vectorString = `[${vector.join(",")}]`;
+  const row = await handlePgDuplicate (
+    pool.query<PgEmbeddingRow>(`INSERT INTO "Embedding" ("word_id", "vector") 
+      VALUES ($1, $2::vector) RETURNING *`, 
+      [ wordId, vectorString]
+    ),
+    "Embedding",
+    wordId
+    );
+  return mapToEmbedding(row);
+}
+
+export async function findByWordId(wordId: number): Promise<Embedding | null> {
+  try {
+    const result = await pool.query<PgEmbeddingRow>(
+      `SELECT id, word_id, vector::text, created_at FROM "Embedding" WHERE word_id = $1`,
+      [wordId]
+    );
+    if (result.rows.length === 0) return null;
+    return mapToEmbedding(result.rows[0]);
+  } catch (error: unknown) {
+    throw new DatabaseError("Error al buscar embedding", {
+      wordId,
+      originalError: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+
 export async function deleteByWordId(wordId: number): Promise<Embedding> {
-  const row = await handlePgNotFound( 
+  const row = await handlePgNotFound(
     pool.query<PgEmbeddingRow>(`DELETE FROM "Embedding" 
-      WHERE word_id = $1`, 
+    WHERE word_id = $1 RETURNING *`, 
       [wordId]),
       "Embedding",
       wordId,
@@ -92,31 +138,33 @@ export async function update(wordId: number, vector: number[]): Promise<Embeddin
   );
   return mapToEmbedding(row);
 }
-
-
-function mapToSearchResult(row: {
-  word_id: number;
-  vector: string;
-  similarity: number;
-}): SearchResult {
-  return {
-    wordId: row.word_id,
-    vector: parseVector(row.vector),
-    similarity: row.similarity,
-  };
-}
+const toVectorStr = (v: number[]) => `[${v.join(",")}]`;
+//en la query estamos resta 1 al proceso de calcular la distancia 
+// para formatera el orden de que suelta los datos y a hacer que 
+// -1 se a el mas lejano y 1 el igual
+const querySearchVector = `
+  SELECT word_id, 1 - ("vector" <=> $1::vector) as similarity
+  FROM "Embedding" 
+  ORDER BY "vector" <=> $1::vector 
+  LIMIT $2
+` as const;
 
 export async function searchSimilar(
   queryVector: number[],
   limit: number = 5
-): Promise<SearchResult[]> {
-  const vectorString = `[${queryVector.join(",")}]`;
-  const result = await pool.query(
-    `SELECT word_id, vector::text, 1 - (vector <=> $1::vector) as similarity
-     FROM "Embedding"
-     ORDER BY vector <=> $1::vector
-     LIMIT $2`,
-    [vectorString, limit]
-  );
-  return result.rows.map(mapToSearchResult);
+): Promise<EmbeddingRow[]> {
+  try{
+    
+    const { rows } = await pool.query<EmbeddingRow>(querySearchVector, [toVectorStr(queryVector), limit]);
+       
+ return rows.map(row => ({
+      word_id: Number(row.word_id), // Aseguramos que sea número (Postgres a veces manda strings)
+      similarity: Number(row.similarity)
+    }));
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DatabaseError(`Error en búsqueda semántica: ${message}`);
+  }
 }
+  

@@ -29,7 +29,14 @@ function redirectToLogin(request: NextRequest) {
 
 export const config = {
   matcher: [
-    
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api/auth (rutas de login/registro)
+     * - _next/static (archivos estáticos)
+     * - _next/image (optimización de imágenes)
+     * - favicon.ico (icono)
+     * - login (la página de login misma)
+     */
+    '/((?!api/auth|_next/static|_next/image|favicon.ico|login).*)',
   ],
 }
-

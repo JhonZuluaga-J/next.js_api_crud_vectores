@@ -40,7 +40,7 @@ export async function create(text: string): Promise<Word> {
   return mapToWord(word);
 }
 
-export async function deleteById(id: number): Promise<Word | null> {
+export async function deleteById(id: number): Promise<Word> {
 
   const deletedWord = await handleNotFoundError(
     prisma.word.delete({ where: { id } }), 
@@ -48,7 +48,7 @@ export async function deleteById(id: number): Promise<Word | null> {
   );
   
   console.log(`[Word Repository]: Word con text "${deletedWord.text} eliminado.`);
-  return deletedWord ? mapToWord(deletedWord) : null;
+  return mapToWord(deletedWord);
 }
 
 
